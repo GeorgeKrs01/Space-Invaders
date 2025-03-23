@@ -31,8 +31,8 @@ public class SpaceInvaders extends JPanel implements ActionListener, KeyListener
 
 
     //board
-    int tileSize = 32;
-    int rows = 16;
+    int tileSize = 20;
+    int rows = 30;
     int columns = rows;
     int boardWidth = tileSize * columns; //32x16=512
     int boardHeight = tileSize * rows;
@@ -67,13 +67,33 @@ public class SpaceInvaders extends JPanel implements ActionListener, KeyListener
     ArrayList<Block> bulletArray;
     int bulletWidth = tileSize / 8;
     int bulletHeight = tileSize / 2;
-    int bulletVelocityY = -10; //bullet moving speed
+    long bulletVelocityY = -10; //bullet moving speed
+    int bulletsToShoot = 1; // default : shoot one bullet
+
+    //Enemy Bullets
+    ArrayList<Block> enemyBulletArray;
+    int enemyBulletWidth = bulletWidth;
+    int enemyBulletHeight = bulletHeight;
+    int enemyBulletVelocityY = 1; // speed of enemy bullets
+    Random random = new Random();
+
+    //Power-Ups
+    ArrayList<Block> powerUpArray = new ArrayList<>();
+    int powerUpWidth = tileSize;
+    int powerUpHeight = tileSize;
+    int powerUpVelocityY = 2;
+    boolean powerUpActive = false;
+    long powerUpTimer = 0;
+//    long powerUpDuration = 5000; //we do not need and like Duration
 
 
 
     Block ship;
 
     Timer gameLoop;
+    int score = 0;
+    boolean gameOver = false;
+
 
     SpaceInvaders() {
         setPreferredSize(new Dimension(boardWidth, boardHeight));
@@ -97,9 +117,11 @@ public class SpaceInvaders extends JPanel implements ActionListener, KeyListener
         ship = new Block(shipX, shipY, shipWidth, shipHeight, shipImg);
         alienArray = new ArrayList<Block>();
         bulletArray = new ArrayList<Block>();
+        enemyBulletArray = new ArrayList<>();
 
         //game timer
-        gameLoop = new Timer(1000/60, this);
+        gameLoop = new Timer(1000/60, this); //60 fps
+//        gameLoop = new Timer(10, this); // faster start
         createAliens();
         gameLoop.start();
     }
@@ -132,6 +154,31 @@ public class SpaceInvaders extends JPanel implements ActionListener, KeyListener
             }
         }
 
+        //enemy bullets
+        g.setColor(Color.RED);
+        for (Block enemyBullet : enemyBulletArray){
+            g.fillRect(enemyBullet.x, enemyBullet.y, enemyBulletWidth, enemyBulletHeight);
+        }
+
+        //Draw power ups
+        g.setColor(Color.BLUE);
+        for (int i = 0; i < powerUpArray.size(); i++) {
+            Block powerUp = powerUpArray.get(i);
+            g.fillOval(powerUp.x, powerUp.y, powerUpWidth, powerUpHeight);
+        }
+
+        //score
+        g.setColor(Color.WHITE);
+        g.setFont(new Font("Arial", Font.PLAIN, 32));
+        if (gameOver) {
+            g.drawString("Game Over: " + String.valueOf(score), 10, 35);
+            g.setFont(new Font("Arial", Font.BOLD, 24));
+            g.drawString("Press any key to restart", boardWidth / 2 - 120, boardHeight / 2);
+        }
+        else {
+            g.drawString(String.valueOf(score), 10, 35);
+        }
+
     }
 
     public void move(){
@@ -144,18 +191,41 @@ public class SpaceInvaders extends JPanel implements ActionListener, KeyListener
                 //if alien touches the borders
                 if (alien.x + alien.width >= boardWidth || alien.x <= 0) {
                     alienVelocityX *= -1;
-                    alien.x += alienVelocityX * 2;
+//                    alien.x += alienVelocityX * 2;
 
                     //move aliens down one row
                     for (int j = 0; j < alienArray.size(); j++){
                         alienArray.get(j).y += alienHeight;
                     }
-
                 }
+
+                //aliens Randomly fire bullets
+                if (random.nextInt(100) < 0.1) { // 0.1% chance to fire per frame
+                    Block enemyBullet = new Block(alien.x + alien.width / 2, alien.y + alien.height, enemyBulletWidth, enemyBulletHeight, null);
+                    enemyBulletArray.add(enemyBullet);
+                }
+
+                //enemy touches the ship
+                if (alien.y >= ship.y) {
+                    gameOver = true;
+                }
+
+                //Move enemy bullets
+                for (int b = 0; b < enemyBulletArray.size(); b++){
+                    Block enemyBullet = enemyBulletArray.get(b);
+                    enemyBullet.y += enemyBulletVelocityY;
+
+                    //check if enemy bullet hits the player
+                    if (detectCollision(enemyBullet, ship)){
+//                        gameOver = true;
+                    }
+                }
+
+                enemyBulletArray.removeIf(bullet -> bullet.y > boardHeight);
             }
         }
 
-        //bullets
+        //player bullets
         for (int i = 0; i < bulletArray.size(); i++){
             Block bullet = bulletArray.get(i);
             bullet.y += bulletVelocityY;
@@ -167,13 +237,76 @@ public class SpaceInvaders extends JPanel implements ActionListener, KeyListener
                     bullet.used = true;
                     alien.alive = false;
                     alienCount --;
+                    score += 100;
+
+                    //chance to spawn power-ups
+                    if (random.nextInt(100) < 20) { //20% chance to spawn a power up
+                        Block powerUp = new Block(alien.x + alien.width / 2, alien.y, powerUpWidth, powerUpHeight, null);
+                        powerUpArray.add(powerUp);
+                    }
                 }
             }
         }
+
+        //clear bullets
+        while (bulletArray.size() > 0 && (bulletArray.get(0).used || bulletArray.get(0).y < 0)){
+            bulletArray.remove(0);
+        }
+
+
+        //Power Ups
+        for (int i = 0; i < powerUpArray.size(); i++){
+            Block powerUp = powerUpArray.get(i);
+            powerUp.y += powerUpVelocityY;
+
+            //remove power-ups off the screen
+            if (powerUp.y > boardHeight){
+                powerUpArray.remove(i);
+                i--;
+            }
+
+            //check if player collects power up
+            if (detectCollision(powerUp, ship)){
+                activatePowerUp();
+                powerUpArray.remove(i);
+                i--;
+            }
+         }
+
+
+
+        //next level
+        if (alienCount == 0) {
+            //increase the number of aliens in columns and rows by 1
+            score += alienColumns * alienRows * 100;
+            alienColumns = Math.min(alienColumns + 1, columns / 2 - 2);
+            alienRows = Math.min(alienRows + 1, rows - 6);
+            alienArray.clear();
+            bulletArray.clear();
+            createAliens();
+//            alienVelocityX += 0.1;
+        }
+    }
+
+    public void activatePowerUp() {
+        powerUpActive = true;
+//        powerUpStartTime = System.currentTimeMillis();
+//        bulletVelocityY *= 1.2;
+        bulletsToShoot++;
+
+        // Optionally limit how many bullets the player can shoot
+//        if (bulletsToShoot > 5) { // For example, max 5 bullets at once
+//            bulletsToShoot = 5;
+//        }
     }
 
     public void createAliens(){
         Random random = new Random();
+
+        //reset aliens to the top left
+        alienY = tileSize;
+        alienArray.clear();
+
         for (int r = 0; r < alienRows; r++){
             for (int c = 0; c < alienColumns; c++){
                 int randomImgIndex = random.nextInt(alienImgArray.size());
@@ -201,6 +334,9 @@ public class SpaceInvaders extends JPanel implements ActionListener, KeyListener
     public void actionPerformed(ActionEvent e) {
         move();
         repaint();
+        if (gameOver) {
+            gameLoop.stop();
+        }
     }
 
 
@@ -212,15 +348,49 @@ public class SpaceInvaders extends JPanel implements ActionListener, KeyListener
 
     @Override
     public void keyReleased(KeyEvent e) {
-        if (e.getKeyCode() == KeyEvent.VK_LEFT && ship.x - shipVelocityX >= 0) {
+        if (gameOver){
+            ship.x = shipX;
+            alienArray.clear();
+            bulletArray.clear();
+            enemyBulletArray.clear();
+            powerUpArray.clear();
+            score = 0;
+            alienVelocityX = 1;
+            alienColumns = 3;
+            alienRows = 2;
+            bulletVelocityY = -10;
+            powerUpActive = false;
+            gameOver = false;
+            createAliens();
+            gameLoop.start();
+        }
+        else if (e.getKeyCode() == KeyEvent.VK_LEFT && ship.x - shipVelocityX >= 0) {
             ship.x -= shipVelocityX;
         }
         else if (e.getKeyCode() == KeyEvent.VK_RIGHT && ship.x + ship.width + shipVelocityX <= boardWidth) {
             ship.x += shipVelocityX;
         }
         else if (e.getKeyCode() == KeyEvent.VK_SPACE) {
-            Block bullet = new Block(ship.x + shipWidth * 15 / 32, ship.y, bulletWidth, bulletHeight, null);
-            bulletArray.add(bullet);
+            //calculate the center of the ship
+            int centerX = ship.x + ship.width / 2;
+
+            int offsetX = 0;
+            for (int i = 0; i < bulletsToShoot; i++) {
+                Block bullet = new Block(
+                        centerX + offsetX, // Spread bullets evenly
+                        ship.y,
+                        bulletWidth,
+                        bulletHeight,
+                        null
+                );
+                bulletArray.add(bullet);
+
+                // Update offset for next bullet to the left and right
+                offsetX += (i % 20 == 0) ? -bulletWidth : bulletWidth;
+            }
+        }
+        else if (e.getKeyCode() == KeyEvent.VK_P) {         //cheat code "P" to PowerUp
+            activatePowerUp();
         }
     }
 
